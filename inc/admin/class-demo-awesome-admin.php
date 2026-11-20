@@ -598,6 +598,9 @@ if (!class_exists('Demo_Awesome_Admin')) {
          * @return array|false Normalized demo data, or false if the demo is not in the list.
          */
         private function get_requested_demo() {
+            // Only called from AJAX handlers that verify the 'demo-awesome' nonce and the
+            // manage_options capability before calling this method.
+            // phpcs:disable WordPress.Security.NonceVerification.Missing
             $index = '';
             if (isset($_POST['demo_index'])) {
                 $index = sanitize_text_field(wp_unslash($_POST['demo_index']));
@@ -605,6 +608,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 // Older admin.js sends the whole demo object; only its index is used.
                 $index = sanitize_text_field(wp_unslash($_POST['data_demo']['index']));
             }
+            // phpcs:enable WordPress.Security.NonceVerification.Missing
             if ($index === '' || !preg_match('/^[0-9]+$/', $index)) {
                 return false;
             }
