@@ -39,6 +39,22 @@ Yes, some demos, for example, e-shops require plugins. The importer will always 
 
 We strongly recommend using these demos for newly created websites, development websites, etc. as the plugin will change or remove much existing content of your website like posts, pages, widgets, theme settings, etc.
 
+== External services ==
+
+This plugin connects to the Theme4Press demo server, **demo.theme4press.com**, operated by Theme4Press. The demos are stored there, so the plugin cannot work without it.
+
+What is requested and when:
+
+* **Opening the demo browser** (Appearance > Demo Awesome): the plugin downloads the list of available demos (`get-list-demos.json`). Your browser loads each demo's screenshot image from the demo server.
+* **Live preview** of a demo: the demo website on demo.theme4press.com is shown in a frame, so it is loaded by your browser.
+* **Importing a demo**: the plugin downloads that demo's content, widget and theme-settings files (and slider files for demos that have them), and WordPress downloads the demo's images.
+
+No personal data, account data or content from your site is sent. As with any web request, the demo server receives the requesting IP address and browser or server details; image downloads made by WordPress also include your site's address in the standard WordPress user-agent header.
+
+Premium demos may require premium plugins. With the evolve Plus theme, these are downloaded by the theme from Theme4Press using the theme's license key; Demo Awesome itself does not send the key. Free required plugins are installed from WordPress.org.
+
+Theme4Press privacy policy: https://theme4press.com/privacy-policy/
+
 == Screenshots ==
 
 1. Main page of the demo importer - demo browser
