@@ -10,6 +10,11 @@
  * @author     Theme4Press
  */
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Customizer Demo Importer Setting class.
  * @see WP_Customize_Setting

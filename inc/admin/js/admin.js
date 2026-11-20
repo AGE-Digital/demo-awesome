@@ -1582,7 +1582,7 @@ jQuery(function ($) {
 
         var data = {
             'action': 'call_import_function_from_ajax',
-            'data_demo': data_demo, action: 'required_plugins',
+            'data_demo': data_demo,
             '_nonce': demo_awesome_js_local_vars._nonce
         };
         jQuery.post(ajaxurl, data, function (response) {

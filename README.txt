@@ -1,10 +1,10 @@
 === Demo Awesome ===
 Contributors: evgenyviner
-Tags: theme4press, data importer, one-click demo import, theme demo, demos, importer, theme4press demo
+Tags: data importer, one-click demo import, theme demo, demos, importer
 Requires at least: 5.5
-Tested up to: 6.8.2
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: trunk
+Stable tag: 1.0.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,21 @@ We strongly recommend using these demos for newly created websites, development 
 4. Once the import is finished, you can start to customize
 
 == Changelog ==
+
+= 1.0.6 =
+* Fixed the demo import doing nothing but showing "requires additional plugins" (a stray duplicate AJAX action introduced by an earlier release)
+* Removed the over-aggressive request rate limit that blocked legitimate importing/plugin installation
+* Allowed required-plugin installation for any valid plugin slug (was limited to a small hardcoded list); hardened the activation match against regex injection
+
+= 1.0.5 =
+* Security: prevented PHP object injection when importing customizer (.dat) data
+* Security: hardened XML validation against XXE / entity-expansion attacks
+* Security: blocked demo data from overwriting sensitive WordPress options
+* Updated the bundled WordPress Importer to 0.8.3 (security & bug fixes, incl. safer attachment downloads and object-injection-safe meta handling)
+* Fixed a bug that disabled the remote demo list cache (every admin page load re-fetched it)
+* Replaced the deprecated get_page_by_title() with a WP_Query-based helper
+* Prevented a fatal error in the plugin install/activate handlers when the theme helper is unavailable
+* Various WordPress coding-standard fixes (text domains, output escaping, script/style enqueue)
 
 = 1.0.2 =
 * Fixed some security vulnerablities

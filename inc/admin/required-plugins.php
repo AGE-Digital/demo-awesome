@@ -8,6 +8,11 @@
  * @author     Theme4Press
  */
 
+// Exit if accessed directly.
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 if (!function_exists('demo_awesome_required_plugins')) {
     function demo_awesome_required_plugins($data_demo = array())
     {
@@ -23,7 +28,8 @@ if (!function_exists('demo_awesome_required_plugins')) {
 
         <div class="refresh-container-box">
             <?php
-            if (isset($_POST['action']) && $_POST['action'] == 'required_plugins') {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- The calling AJAX handler (required_plugins()) verifies the nonce before this template is included.
+            if (isset($_POST['action']) && 'required_plugins' === sanitize_text_field(wp_unslash($_POST['action']))) {
                 $requred_message = [];
                 if ($data_demo) {
                     foreach ($data_demo['plugins'] as $plugin_keyword => $plugin) {
@@ -44,14 +50,14 @@ if (!function_exists('demo_awesome_required_plugins')) {
                     } ?>" role="alert">
 
 
-                        <span class="mr-1"><?php echo Demo_Awesome_Admin::get_svg('warning'); ?></span><?php esc_html_e(
+                        <span class="mr-1"><?php echo wp_kses( Demo_Awesome_Admin::get_svg('warning'), Demo_Awesome_Admin::allowed_svg_tags() ); ?></span><?php esc_html_e(
                             'This demo import requires additional plugins',
                             'demo-awesome'
                         );
                         ?>
                         <button class="button button-primary refresh-required"><span
                                     class="mr-1"
-                                    name="refresh-required"><?php echo Demo_Awesome_Admin::get_svg('refresh'); ?></span>
+                                    name="refresh-required"><?php echo wp_kses( Demo_Awesome_Admin::get_svg('refresh'), Demo_Awesome_Admin::allowed_svg_tags() ); ?></span>
                             <?php esc_html_e('Refresh', 'demo-awesome'); ?>
                         </button>
 
@@ -65,16 +71,16 @@ if (!function_exists('demo_awesome_required_plugins')) {
                 } ?>" role="alert">
 
 
-                    <span class="mr-1"><?php echo Demo_Awesome_Admin::get_svg('warning'); ?></span><?php esc_html_e(
+                    <span class="mr-1"><?php echo wp_kses( Demo_Awesome_Admin::get_svg('warning'), Demo_Awesome_Admin::allowed_svg_tags() ); ?></span><?php esc_html_e(
                         'This demo import requires additional plugins',
                         'demo-awesome'
                     );
                     ?>
                     <button class="button button-primary refresh-required"><span
                                 class="mr-1"
-                                name="refresh-required"><?php echo wp_kses_post( Demo_Awesome_Admin::get_svg(
+                                name="refresh-required"><?php echo wp_kses( Demo_Awesome_Admin::get_svg(
                                 'refresh'
-                            )); ?></span><?php esc_html_e('Refresh', 'demo-awesome'); ?>
+                            ), Demo_Awesome_Admin::allowed_svg_tags() ); ?></span><?php esc_html_e('Refresh', 'demo-awesome'); ?>
                     </button>
 
                 </div>
@@ -159,9 +165,9 @@ if (!function_exists('demo_awesome_required_plugins')) {
                                 ?>
                                 <li>
                                     <strong><?php
-                                        echo wp_kses_post($plugin['name'].'<br />'.$required_plugin); ?></strong>
+                                        echo wp_kses($plugin['name'].'<br />'.$required_plugin, Demo_Awesome_Admin::allowed_svg_tags()); ?></strong>
                                     <?php if (current_user_can(  'install_plugins' ) || current_user_can( 'update_plugins' )) {
-                                        echo wp_kses_post($premium_plugin);
+                                        echo wp_kses($premium_plugin, Demo_Awesome_Admin::allowed_svg_tags());
                                     } ?>
                                 </li>
                                 <?php
@@ -170,7 +176,7 @@ if (!function_exists('demo_awesome_required_plugins')) {
                     </ul>
                     <?php if ($show_required_description) { ?>
                         <p class="alert alert-info required-description-text"><span
-                                    class="mr-1"><?php echo wp_kses_post( Demo_Awesome_Admin::get_svg('info')); ?></span><?php esc_html_e(
+                                    class="mr-1"><?php echo wp_kses( Demo_Awesome_Admin::get_svg('info'), Demo_Awesome_Admin::allowed_svg_tags() ); ?></span><?php esc_html_e(
                                 'You can install/activate the required plugin(s) before import or import the demo content now. Importing content without enabled required plugin(s) may result in broken page layout or not importing the data supported by the plugin(s).',
                                 'demo-awesome'
                             ); ?>

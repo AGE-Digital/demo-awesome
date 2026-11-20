@@ -8,6 +8,11 @@
  * @author     Theme4Press
  */
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 if ( ! class_exists( 'Demo_Awesome_Loader' ) ) {
 	class Demo_Awesome_Loader {
 
