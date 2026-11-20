@@ -8,6 +8,11 @@
  * @author     Theme4Press
  */
 
+// Exit if accessed directly.
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 if (!defined('DEMO_AWESOME_IMPORTER_FOLDER')) {
     define('DEMO_AWESOME_IMPORTER_FOLDER', '/demo-awesome-import/');
 }
@@ -47,7 +52,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
             add_action('demo_awesome_remove_old_posts_pages', array($this, 'remove_old_posts_pages'));
             add_action('wp_loaded', array($this, 'hide_notice'));
             add_filter(
-                'customizer_demo_import_settings',
+                'demo_awesome_customizer_import_settings',
                 array(
                     $this,
                     'update_customizer_data',
@@ -55,9 +60,13 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 10,
                 2
             );
-            add_filter('widget_demo_import_settings', array($this, 'update_widget_data'), 10, 4);
+            add_filter('demo_awesome_widget_import_settings', array($this, 'update_widget_data'), 10, 4);
 
-            if (isset($_GET['hide-notice']) && $_GET['hide-notice'] == 'demo_awesome_no_theme4press_theme_notice') {
+            if (isset($_GET['hide-notice'])
+                && 'demo_awesome_no_theme4press_theme_notice' === sanitize_text_field(wp_unslash($_GET['hide-notice']))
+                && isset($_GET['_demo_awesome_notice'])
+                && wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_demo_awesome_notice'])), 'demo_awesome_hide_notice')
+                && current_user_can('edit_theme_options')) {
                 update_option('demo_awesome_no_theme4press_theme_notice', 0);
             }
             if (get_option('demo_awesome_no_theme4press_theme_notice', 1)) {
@@ -84,16 +93,17 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         public static function hide_notice()
         {
-            if (isset($_GET['demo-awesome-hide-notice']) && $_GET['demo-awesome-hide-notice'] == 'activation_notice') {
-                if (!wp_verify_nonce($_GET['_demo_awesome_notice'], 'demo_awesome_hide_notice')) {
-                    wp_die(__('Action failed. Please refresh the page and retry.', 'evolve'));
+            if (isset($_GET['demo-awesome-hide-notice']) && 'activation_notice' === sanitize_text_field(wp_unslash($_GET['demo-awesome-hide-notice']))) {
+                $notice_nonce = isset($_GET['_demo_awesome_notice']) ? sanitize_text_field(wp_unslash($_GET['_demo_awesome_notice'])) : '';
+                if (!wp_verify_nonce($notice_nonce, 'demo_awesome_hide_notice')) {
+                    wp_die(esc_html__('Action failed. Please refresh the page and retry.', 'demo-awesome'));
                 }
 
                 if (!current_user_can('manage_options')) {
-                    wp_die(__('Cheatin&#8217; huh?', 'evolve'));
+                    wp_die(esc_html__('Cheatin&#8217; huh?', 'demo-awesome'));
                 }
 
-                $hide_notice = sanitize_text_field($_GET['demo-awesome-hide-notice']);
+                $hide_notice = sanitize_text_field(wp_unslash($_GET['demo-awesome-hide-notice']));
                 update_option('demo_awesome_'.$hide_notice, 1);
             }
         }
@@ -116,43 +126,49 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
 
-            $packages = '';
-            $decode_url = base64_encode($url);
-            if (true || false === ($create_time = get_transient('demo_awesome_importer_packages_'.$decode_url))) {
-                // Security: Use wp_safe_remote_get with proper args
-                $raw_packages = wp_safe_remote_get($url, array(
-                    'timeout' => 30,
-                    'redirection' => 3,
-                    'user-agent' => 'Demo Awesome Plugin',
-                    'sslverify' => true,
-                    'headers' => array(
-                        'Accept' => 'application/json, text/plain, */*',
-                    )
-                ));
-                
-                if (!is_wp_error($raw_packages)) {
-                    $response_code = wp_remote_retrieve_response_code($raw_packages);
-                    if ($response_code === 200) {
-                        $packages = wp_remote_retrieve_body($raw_packages);
-                        
-                        // Security: Validate response content
-                        if ($packages && $this->validate_response_content($packages)) {
-                            set_transient('demo_awesome_importer_packages_'.$decode_url, time(), HOUR_IN_SECONDS);
-                            $this->write_file_to_local($packages, $decode_url.'.txt');
-                        } else {
-                            $packages = false;
-                        }
-                    }
-                }
-            } else {
-                // Security: Use safe file reading
-                $file_path = wp_upload_dir()['basedir'].DEMO_AWESOME_IMPORTER_FOLDER.$decode_url.'.txt';
+            // Cache file name and transient key are derived from an md5 of the URL. (They used to
+            // be base64, whose "=" padding was stripped when writing the file but not when reading
+            // it, so every cached read of such a URL failed.)
+            $cache_key = md5($url);
+            $transient = 'demo_awesome_importer_packages_'.$cache_key;
+            $cache_file = $cache_key.'.txt';
+
+            // Use the cached copy if it is fresh and still valid; otherwise download again.
+            if (false !== get_transient($transient)) {
+                $file_path = wp_upload_dir()['basedir'].DEMO_AWESOME_IMPORTER_FOLDER.$cache_file;
                 if (file_exists($file_path) && is_readable($file_path)) {
                     $packages = file_get_contents($file_path);
-                    if (!$this->validate_response_content($packages)) {
-                        $packages = false;
+                    if ($packages && $this->validate_response_content($packages)) {
+                        return $packages;
                     }
                 }
+            }
+
+            // Security: Use wp_safe_remote_get with proper args
+            $raw_packages = wp_safe_remote_get($url, array(
+                'timeout' => 30,
+                'redirection' => 3,
+                'user-agent' => 'Demo Awesome Plugin',
+                'sslverify' => true,
+                'headers' => array(
+                    'Accept' => 'application/json, text/plain, */*',
+                )
+            ));
+
+            if (is_wp_error($raw_packages) || wp_remote_retrieve_response_code($raw_packages) !== 200) {
+                return false;
+            }
+
+            $packages = wp_remote_retrieve_body($raw_packages);
+
+            // Security: Validate response content
+            if (!$packages || !$this->validate_response_content($packages)) {
+                return false;
+            }
+
+            // Only mark the cache as fresh if the copy was actually written.
+            if ($this->write_file_to_local($packages, $cache_file)) {
+                set_transient($transient, time(), HOUR_IN_SECONDS);
             }
 
             return $packages;
@@ -168,7 +184,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
             
-            $parsed_url = parse_url($url);
+            $parsed_url = wp_parse_url($url);
             
             // Check if URL has required components
             if (!isset($parsed_url['scheme']) || !isset($parsed_url['host'])) {
@@ -205,17 +221,26 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
             
-            // Check content length (prevent DoS)
-            if (strlen($content) > 10 * 1024 * 1024) { // 10MB limit for responses
+            // Check content length (prevent DoS). Same limit as validate_file_content().
+            if (strlen($content) > 50 * 1024 * 1024) {
                 return false;
             }
-            
-            // Check for malicious content
-            if (preg_match('/<\?php|<\?=|<script[^>]*>|javascript:|data:/i', $content)) {
-                return false;
-            }
-            
+
+            // No keyword filtering here: every response is cached and written through
+            // write_file_to_local(), which validates it per file type (XML/JSON/serialized/ZIP)
+            // and rejects PHP code. Blocking "<script", "javascript:" or "data:" rejected
+            // legitimate demo content (e.g. cached Twitter/YouTube embeds in post meta),
+            // which WordPress itself stores and imports as normal content.
             return true;
+        }
+
+        /**
+         * Whether a downloaded file contains a PHP opening tag.
+         * Demo data never legitimately contains PHP code.
+         * @since 1.0.6
+         */
+        private function contains_php_code($content) {
+            return (bool) preg_match('/<\?php|<\?=/i', $content);
         }
 
         /**
@@ -270,9 +295,8 @@ if (!class_exists('Demo_Awesome_Admin')) {
             
             $upload_dir = wp_upload_dir()['basedir'].DEMO_AWESOME_IMPORTER_FOLDER;
             if (!is_dir($upload_dir)) {
+                // wp_mkdir_p() applies the correct, WordPress-managed directory permissions (FS_CHMOD_DIR).
                 wp_mkdir_p($upload_dir);
-                // Set proper permissions
-                chmod($upload_dir, 0755);
             }
             
             $file_path = $upload_dir.$file_name;
@@ -377,19 +401,30 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_xml_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
-            // Basic XML structure validation
-            $dom = new DOMDocument();
-            $dom->loadXML($content, LIBXML_NOENT | LIBXML_DTDLOAD | LIBXML_DTDATTR);
-            
-            if ($dom === false) {
-                return false;
+            // Basic XML structure validation.
+            // Security: disable network access and external entity loading to
+            // prevent XXE and entity-expansion (billion laughs) attacks. Never
+            // use LIBXML_NOENT/LIBXML_DTDLOAD here, they enable the very attacks
+            // this check is meant to guard against.
+            if (PHP_VERSION_ID < 80000 && function_exists('libxml_disable_entity_loader')) {
+                $previous_loader = libxml_disable_entity_loader(true);
             }
-            
-            return true;
+            $previous_errors = libxml_use_internal_errors(true);
+
+            $dom    = new DOMDocument();
+            $loaded = $dom->loadXML($content, LIBXML_NONET);
+
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous_errors);
+            if (PHP_VERSION_ID < 80000 && function_exists('libxml_disable_entity_loader') && isset($previous_loader)) {
+                libxml_disable_entity_loader($previous_loader);
+            }
+
+            return $loaded !== false;
         }
 
         /**
@@ -398,7 +433,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_json_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -412,12 +447,16 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_dat_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
-            // Basic validation for serialized data
-            $unserialized = maybe_unserialize($content);
+            // Basic validation for serialized data. Disable object instantiation
+            // so the validation step itself cannot trigger PHP object injection.
+            if (!is_serialized($content)) {
+                return false;
+            }
+            $unserialized = unserialize(trim($content), array('allowed_classes' => false));
             return $unserialized !== false;
         }
 
@@ -427,7 +466,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_wie_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -455,7 +494,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_txt_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -536,54 +575,85 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
 
-            // Check for path traversal attempts
-            if (strpos($template_name, '..') !== false || 
-                strpos($template_name, '/') !== false || 
-                strpos($template_name, '\\') !== false) {
-                return false;
-            }
-
-            // Check for null bytes
-            if (strpos($template_name, "\0") !== false) {
-                return false;
-            }
-
-            // Sanitize and validate
-            $template_name = sanitize_file_name($template_name);
-            
             // Check length
             if (strlen($template_name) > 100) {
                 return false;
             }
 
-            // Only allow alphanumeric, hyphens, and underscores
-            if (!preg_match('/^[a-zA-Z0-9_-]+$/', $template_name)) {
-                return false;
-            }
-
-            return true;
+            // Demo folders are "<category>/<number>" (e.g. "business/1"), so one "/" between
+            // two safe segments is allowed. The whitelist excludes "..", backslashes, null
+            // bytes, leading/trailing slashes and anything else that could leave the demo folder.
+            return (bool) preg_match('#^[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)?$#', $template_name);
         }
 
         /**
-         * Rate limiting to prevent abuse
-         * @since 1.0.3
+         * Look up the demo the user picked in the demo list downloaded from the demo server.
+         *
+         * The browser only identifies the demo by its "index". Everything else (folder, required
+         * plugins, options to update, slider flags) comes from the server-side list, never from
+         * the request, so a forged request cannot change what gets downloaded or which options
+         * get written.
+         *
+         * @since 1.0.6
+         * @return array|false Normalized demo data, or false if the demo is not in the list.
          */
-        private function check_rate_limit() {
-            $user_id = get_current_user_id();
-            $transient_key = 'demo_awesome_rate_limit_' . $user_id;
-            
-            $requests = get_transient($transient_key);
-            if ($requests === false) {
-                $requests = 0;
+        private function get_requested_demo() {
+            // Only called from AJAX handlers that verify the 'demo-awesome' nonce and the
+            // manage_options capability before calling this method.
+            // phpcs:disable WordPress.Security.NonceVerification.Missing
+            $index = '';
+            if (isset($_POST['demo_index'])) {
+                $index = sanitize_text_field(wp_unslash($_POST['demo_index']));
+            } elseif (isset($_POST['data_demo']['index'])) {
+                // Older admin.js sends the whole demo object; only its index is used.
+                $index = sanitize_text_field(wp_unslash($_POST['data_demo']['index']));
             }
-
-            // Allow 5 requests per hour
-            if ($requests >= 5) {
+            // phpcs:enable WordPress.Security.NonceVerification.Missing
+            if ($index === '' || !preg_match('/^[0-9]+$/', $index)) {
                 return false;
             }
 
-            set_transient($transient_key, $requests + 1, HOUR_IN_SECONDS);
-            return true;
+            $list = json_decode((string) $this->get_list_demos(), true);
+            if (!is_array($list)) {
+                return false;
+            }
+            foreach ($list as $category) {
+                if (empty($category['items']) || !is_array($category['items'])) {
+                    continue;
+                }
+                foreach ($category['items'] as $item) {
+                    if (isset($item['index']) && (string) $item['index'] === $index) {
+                        return $this->normalize_demo_data($item);
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Fill in optional demo fields so later code can rely on them being set, and map the
+         * demo list's "has_LayerSlider WP_data" key to the "has_layerslider_data" key used here.
+         *
+         * @since 1.0.6
+         */
+        private function normalize_demo_data($demo) {
+            if (isset($demo['has_LayerSlider WP_data']) && !isset($demo['has_layerslider_data'])) {
+                $demo['has_layerslider_data'] = $demo['has_LayerSlider WP_data'];
+            }
+            $defaults = array(
+                'premium_demo' => false,
+                'has_theme4press_slider_data' => false,
+                'has_slider_revolution_data' => false,
+                'has_layerslider_data' => false,
+                'plugins' => array(),
+                'option_update' => array(),
+                'update_galleries' => array(),
+                'customizer_data_update' => array(),
+                'widgets_data_update' => array(),
+            );
+
+            return $this->validate_and_sanitize_demo_data(array_merge($defaults, $demo));
         }
 
         /**
@@ -612,18 +682,15 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
 
-            // Only allow alphanumeric, hyphens, underscores, and spaces
+            // Only allow alphanumeric, hyphens, underscores, and spaces (covers both
+            // plugin slugs and display names). The capability check
+            // (install_plugins / activate_plugins) is the real authorization gate;
+            // this only rejects path traversal, null bytes and regex-unsafe input.
             if (!preg_match('/^[a-zA-Z0-9_\- ]+$/', $plugin_name)) {
                 return false;
             }
 
-            // Whitelist of allowed plugin names (add more as needed)
-            $allowed_plugins = array(
-                'LayerSlider WP', 'LayerSlider', 'Slider Revolution', 'revslider',
-                'Contact Form 7', 'WooCommerce', 'Elementor', 'Beaver Builder'
-            );
-
-            return in_array($plugin_name, $allowed_plugins);
+            return true;
         }
 
         /**
@@ -632,7 +699,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
         function call_import_function_from_ajax()
         {
             // Security: Enhanced nonce verification
-            if ( !wp_verify_nonce( $_POST['_nonce'] ?? '', 'demo-awesome' ) ) {
+            if ( !wp_verify_nonce( isset($_POST['_nonce']) ? sanitize_text_field(wp_unslash($_POST['_nonce'])) : '', 'demo-awesome' ) ) {
                 wp_send_json_error( array(
                     'message' => 'Security check failed. Please refresh the page and try again.',
                     'code' => 'invalid_nonce'
@@ -649,57 +716,52 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 wp_die();
             }
 
-            // Security: Rate limiting check
-            if (!$this->check_rate_limit()) {
+            // Security: the demo is looked up by index in the server-side demo list; no other
+            // request data is used.
+            $data_demo = $this->get_requested_demo();
+            if ($data_demo === false) {
                 wp_send_json_error( array(
-                    'message' => 'Too many requests. Please wait before trying again.',
-                    'code' => 'rate_limit_exceeded'
+                    'message' => esc_html__('The selected demo could not be found in the demo list. Please reload the page and try again. If it keeps happening, the demo server may be unreachable.', 'demo-awesome'),
+                    'code' => 'demo_not_found'
                 ));
                 wp_die();
             }
-            
-            $data_demo_raw = isset($_REQUEST['data_demo']) ? $_REQUEST['data_demo'] : array();
-            $data_demo = array();
 
-            // Security: Enhanced input validation and sanitization
-            if (is_array($data_demo_raw)) {
-                $data_demo = $this->validate_and_sanitize_demo_data($data_demo_raw);
-                if ($data_demo === false) {
-                    wp_send_json_error( array(
-                        'message' => 'Invalid demo data provided.',
-                        'code' => 'invalid_data'
-                    ));
-                    wp_die();
-                }
-            } else {
-                $data_demo = sanitize_text_field($data_demo_raw);
-            }
-
-            $template_name = isset($data_demo['folder_path']) ? sanitize_text_field($data_demo['folder_path']) : '';
+            $template_name = isset($data_demo['folder_path']) ? $data_demo['folder_path'] : '';
 
             // Security: Validate template name
             if (!$this->validate_template_name($template_name)) {
                 wp_send_json_error( array(
-                    'message' => 'Invalid template name.',
+                    'message' => esc_html__('Invalid demo folder.', 'demo-awesome'),
                     'code' => 'invalid_template'
                 ));
                 wp_die();
             }
 
-            $this->remove_old_datas($data_demo, $template_name);
-
+            // Check this before remove_old_datas(): refusing a premium demo must not
+            // first wipe the site's theme settings, menus and widgets.
             if (Demo_Awesome_Admin::is_premium_theme() == false && $data_demo['premium_demo']) {
-                wp_send_json_success(
+                wp_send_json_error(
                     array(
-                        'success' => true,
-                        'message' => sprintf(
-                            '<span>%s</span>',
-                            esc_html__('The premium demo requires the premium theme version', 'demo-awesome')
-                        ),
+                        'message' => esc_html__('The premium demo requires the premium theme version', 'demo-awesome'),
+                        'code' => 'premium_required'
                     )
                 );
                 wp_die();
             }
+
+            // Download and validate the demo content before removing anything, so a failed
+            // download leaves the site untouched. The file is cached, so the import step below
+            // reuses it instead of downloading it again.
+            if (!$this->get_import_file_path($template_name)) {
+                wp_send_json_error( array(
+                    'message' => esc_html__('The demo content could not be downloaded from the demo server, or it failed validation. Nothing on your site was changed. Please try again later.', 'demo-awesome'),
+                    'code' => 'download_failed'
+                ));
+                wp_die();
+            }
+
+            $this->remove_old_datas($data_demo, $template_name);
             // Import content data
             $this->import_content_theme($data_demo, $template_name);
             // Import customizer
@@ -789,33 +851,23 @@ if (!class_exists('Demo_Awesome_Admin')) {
         function required_plugins()
         {
             // Security: Enhanced nonce verification
-            if (!wp_verify_nonce($_POST['_nonce'] ?? '', 'demo-awesome')) {
-                wp_die(__('Security check failed.', 'demo-awesome'));
+            if (!wp_verify_nonce(isset($_POST['_nonce']) ? sanitize_text_field(wp_unslash($_POST['_nonce'])) : '', 'demo-awesome')) {
+                wp_die(esc_html__('Security check failed.', 'demo-awesome'));
             }
             
             // Security: Enhanced capability check
             if (!current_user_can('manage_options')) {
-                wp_die(__('You do not have sufficient permissions.', 'demo-awesome'));
+                wp_die(esc_html__('You do not have sufficient permissions.', 'demo-awesome'));
             }
 
-            // Security: Rate limiting check
-            if (!$this->check_rate_limit()) {
-                wp_die(__('Too many requests. Please wait before trying again.', 'demo-awesome'));
-            }
             
             // Include the required plugins list
             require dirname(__FILE__).'/required-plugins.php';
-            $data_demo_raw = isset($_REQUEST['data_demo']) ? $_REQUEST['data_demo'] : array();
-            $data_demo = array();
-
-            // Security: Enhanced input validation and sanitization
-            if (is_array($data_demo_raw)) {
-                $data_demo = $this->validate_and_sanitize_demo_data($data_demo_raw);
-                if ($data_demo === false) {
-                    wp_die(__('Invalid demo data provided.', 'demo-awesome'));
-                }
-            } else {
-                $data_demo = sanitize_text_field($data_demo_raw);
+            // Security: the demo (and so its required-plugin list) comes from the server-side
+            // demo list, looked up by index; no other request data is used.
+            $data_demo = $this->get_requested_demo();
+            if ($data_demo === false) {
+                wp_die(esc_html__('The selected demo could not be found in the demo list. Please reload the page and try again.', 'demo-awesome'));
             }
 
             demo_awesome_required_plugins($data_demo);
@@ -825,45 +877,46 @@ if (!class_exists('Demo_Awesome_Admin')) {
         function evole_activate_plugin()
         {
             // Security: Enhanced nonce verification
-            if (!wp_verify_nonce($_POST['_nonce'] ?? '', 'demo-awesome')) {
-                wp_die(__('Security check failed.', 'demo-awesome'));
+            if (!wp_verify_nonce(isset($_POST['_nonce']) ? sanitize_text_field(wp_unslash($_POST['_nonce'])) : '', 'demo-awesome')) {
+                wp_die(esc_html__('Security check failed.', 'demo-awesome'));
             }
     
             // Security: Enhanced capability check
             if (!current_user_can('activate_plugins')) {
-                wp_die(__('Sorry, you are not allowed to activate plugins on this site.', 'demo-awesome'));
+                wp_die(esc_html__('Sorry, you are not allowed to activate plugins on this site.', 'demo-awesome'));
             }
 
-            // Security: Rate limiting check
-            if (!$this->check_rate_limit()) {
-                wp_die(__('Too many requests. Please wait before trying again.', 'demo-awesome'));
-            }
             
             // Security: Validate and sanitize plugin name
-            $plugin = sanitize_text_field($_POST['plugin']);
+            $plugin = isset($_POST['plugin']) ? sanitize_text_field(wp_unslash($_POST['plugin'])) : '';
             if (!$this->validate_plugin_name($plugin)) {
-                wp_die(__('Invalid plugin name provided.', 'demo-awesome'));
+                wp_die(esc_html__('Invalid plugin name provided.', 'demo-awesome'));
             }
             
             $activate = isset($_POST['activate']) ? true : false;
 
             if ($activate == false) {
                 if ($plugin == 'LayerSlider WP') {
-                    evolve_get_update_plugin('layerslider');
+                    if (function_exists('evolve_get_update_plugin')) {
+                        evolve_get_update_plugin('layerslider');
+                    }
                     $plugin = 'LayerSlider';
                 } elseif ($plugin == 'slider-revolution') {
                     $plugin = 'revslider';
                 } else {
-                    evolve_get_update_plugin($plugin);
-
+                    if (function_exists('evolve_get_update_plugin')) {
+                        evolve_get_update_plugin($plugin);
+                    }
                 }
 
             }
-            $html = str_replace('Not installed', 'Not active', stripslashes($_POST['html']));
+            $html_raw = isset($_POST['html']) ? wp_kses_post(wp_unslash($_POST['html'])) : '';
+            $html = str_replace('Not installed', 'Not active', $html_raw);
+            // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- 'all_plugins' is a WordPress core filter.
             $all_plugins = apply_filters('all_plugins', get_plugins());
             foreach ($all_plugins as $k => $item) {
 
-                if (preg_match('#'.$plugin.'#', $k)) {
+                if (preg_match('#'.preg_quote($plugin, '#').'#', $k)) {
                     activate_plugin($k);
                 }
             }
@@ -877,50 +930,51 @@ if (!class_exists('Demo_Awesome_Admin')) {
         function install_plugin()
         {   
             // Security: Enhanced nonce verification
-            if (!wp_verify_nonce($_POST['_nonce'] ?? '', 'demo-awesome')) {
-                wp_die(__('Security check failed.', 'demo-awesome'));
+            if (!wp_verify_nonce(isset($_POST['_nonce']) ? sanitize_text_field(wp_unslash($_POST['_nonce'])) : '', 'demo-awesome')) {
+                wp_die(esc_html__('Security check failed.', 'demo-awesome'));
             }
 
             // Security: Enhanced capability check
             if (!current_user_can('install_plugins')) {
-                wp_die(__('Sorry, you are not allowed to install plugins on this site.', 'demo-awesome'));
+                wp_die(esc_html__('Sorry, you are not allowed to install plugins on this site.', 'demo-awesome'));
             }
 
-            // Security: Rate limiting check
-            if (!$this->check_rate_limit()) {
-                wp_die(__('Too many requests. Please wait before trying again.', 'demo-awesome'));
-            }
 
             // Security: Validate and sanitize plugin name
-            $plugin = sanitize_text_field($_POST['plugin']);
+            $plugin = isset($_POST['plugin']) ? sanitize_text_field(wp_unslash($_POST['plugin'])) : '';
             if (!$this->validate_plugin_name($plugin)) {
-                wp_die(__('Invalid plugin name provided.', 'demo-awesome'));
+                wp_die(esc_html__('Invalid plugin name provided.', 'demo-awesome'));
             }
             
             $activate = isset($_POST['activate']) ? true : false;
 
             if ($activate == false) {
                 if ($plugin == 'LayerSlider WP') {
-                    evolve_get_update_plugin('layerslider');
+                    if (function_exists('evolve_get_update_plugin')) {
+                        evolve_get_update_plugin('layerslider');
+                    }
                     $plugin = 'LayerSlider';
                 } elseif ($plugin == 'slider-revolution') {
                     $plugin = 'revslider';
                 } else {
-                    evolve_get_update_plugin($plugin);
-
+                    if (function_exists('evolve_get_update_plugin')) {
+                        evolve_get_update_plugin($plugin);
+                    }
                 }
 
             }
 
+            // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- 'all_plugins' is a WordPress core filter.
             $all_plugins = apply_filters('all_plugins', get_plugins());
 
             foreach ($all_plugins as $k => $item) {
 
-                if (preg_match('#'.$plugin.'#', $k)) {
+                if (preg_match('#'.preg_quote($plugin, '#').'#', $k)) {
                     activate_plugin($k);
                 }
             }
-            $html = str_replace('Not installed', 'Not active', stripslashes($_POST['html']));
+            $html_raw = isset($_POST['html']) ? wp_kses_post(wp_unslash($_POST['html'])) : '';
+            $html = str_replace('Not installed', 'Not active', $html_raw);
 
             echo wp_kses_post($html);
 
@@ -941,6 +995,56 @@ if (!class_exists('Demo_Awesome_Admin')) {
         }
 
         /**
+         * Determine whether an option name is too sensitive to be written from
+         * remote demo data (prevents privilege escalation / takeover if the demo
+         * source is ever compromised or spoofed).
+         *
+         * @since 1.0.5
+         */
+        private function is_protected_option($option_name)
+        {
+            $protected = array(
+                'users_can_register', 'default_role', 'siteurl', 'home',
+                'admin_email', 'new_admin_email', 'template', 'stylesheet',
+                'active_plugins', 'mailserver_url', 'mailserver_login',
+                'mailserver_pass', 'mailserver_port', 'cron', 'rewrite_rules',
+                'ftp_credentials', 'auth_key', 'auth_salt', 'secret',
+                'db_version', 'WPLANG', 'fileupload_url',
+            );
+
+            return in_array($option_name, $protected, true);
+        }
+
+        /**
+         * Deprecation-safe replacement for get_page_by_title() (removed/deprecated
+         * in modern WordPress). Returns the first matching post object or null.
+         *
+         * @since 1.0.5
+         */
+        private function get_page_by_title_compat($title, $post_type = 'page')
+        {
+            $args = array(
+                'post_type'              => $post_type,
+                'title'                  => $title,
+                'posts_per_page'         => 1,
+                'no_found_rows'          => true,
+                'ignore_sticky_posts'    => true,
+                'update_post_term_cache' => false,
+                'update_post_meta_cache' => false,
+                'orderby'                => 'post_date ID',
+                'order'                  => 'ASC',
+            );
+
+            if ('attachment' === $post_type) {
+                $args['post_status'] = 'inherit';
+            }
+
+            $query = new WP_Query($args);
+
+            return !empty($query->posts) ? $query->posts[0] : null;
+        }
+
+        /**
          * @since    1.0.0
          */
         function update_option_data($data_demo, $template_name = 'blog')
@@ -949,12 +1053,20 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 foreach ($data_demo['option_update'] as $data_type => $data_value) {
                     if ($data_type == 'update_pages' && $data_value && is_array($data_value) && count($data_value)) {
                         foreach ($data_value as $option_name => $option_value) {
-                            $page = get_page_by_title($option_value);
+                            // Security: never let demo data target a protected option.
+                            if ($this->is_protected_option($option_name)) {
+                                continue;
+                            }
+                            $page = $this->get_page_by_title_compat($option_value);
                             if (is_object($page) && $page->ID) {
                                 update_option($option_name, $page->ID);
                             }
                         }
                     } else {
+                        // Security: never let demo data target a protected option.
+                        if ($this->is_protected_option($data_type)) {
+                            continue;
+                        }
                         update_option($data_type, $data_value);
                     }
                 }
@@ -969,14 +1081,14 @@ if (!class_exists('Demo_Awesome_Admin')) {
             if (!empty($data_demo['update_galleries']) && !empty($data_demo['update_galleries']['pages'])) {
                 foreach ($data_demo['update_galleries']['pages'] as $data_value) {
                     if (!empty($data_value['title'])) {
-                        $page = get_page_by_title($data_value['title']);
+                        $page = $this->get_page_by_title_compat($data_value['title']);
                         if (is_object($page) && $page->ID) {
                             foreach ($data_value['items'] as $shortcode_values) {
                                 $names = explode(',', $shortcode_values['names']);
                                 $ids = explode(',', $shortcode_values['ids']);
                                 $new_ids = array();
                                 foreach ($ids as $id_key => $id) {
-                                    $attach = get_page_by_title($names[$id_key], OBJECT, 'attachment');
+                                    $attach = $this->get_page_by_title_compat($names[$id_key], 'attachment');
                                     if (is_object($attach) && $attach->ID) {
                                         $new_ids[] = $attach->ID;
                                     }
@@ -1023,7 +1135,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
             }
 
             // Include Class Demo Awesome Importer
-            require dirname(__FILE__).'/importer/class-demo-awesome-importer.php';
+            require_once dirname(__FILE__).'/importer/class-demo-awesome-importer.php';
 
             if (is_file($import_file)) {
                 $wp_import = new Demo_Awesome_Importer();
@@ -1192,8 +1304,8 @@ if (!class_exists('Demo_Awesome_Admin')) {
                     if (!empty($menu_items)) {
                         foreach ($menu_items as $menu_item) {
                             if (isset($menu_item->url) && isset($menu_item->db_id) && 'custom' == $menu_item->type) {
-                                $site_parts = parse_url(home_url('/'));
-                                $menu_parts = parse_url($menu_item->url);
+                                $site_parts = wp_parse_url(home_url('/'));
+                                $menu_parts = wp_parse_url($menu_item->url);
 
                                 // Update existing custom nav menu item URL.
                                 if (isset($menu_parts['path']) && isset($menu_parts['host']) && apply_filters(
@@ -1244,7 +1356,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                         case 'pages':
                             foreach ($data_value as $option_key => $option_value) {
                                 if (!empty($data['mods'][$option_key])) {
-                                    $page = get_page_by_title($option_value);
+                                    $page = $this->get_page_by_title_compat($option_value);
 
                                     if (is_object($page) && $page->ID) {
                                         $data['mods'][$option_key] = $page->ID;
@@ -1314,7 +1426,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                             foreach ($dropdown_data as $widget_id => $widget_data) {
                                 if (!empty($widget_data[$instance_id]) && $widget_id == $widget_type) {
                                     foreach ($widget_data[$instance_id] as $widget_key => $widget_value) {
-                                        $page = get_page_by_title($widget_value);
+                                        $page = $this->get_page_by_title_compat($widget_value);
 
                                         if (is_object($page) && $page->ID) {
                                             $widget[$widget_key] = $page->ID;
@@ -1375,18 +1487,21 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return;
             }
 
-            wp_enqueue_style('demo-awesome-notice', plugin_dir_url(__FILE__).'css/notice.css'); ?>
+            wp_enqueue_style('demo-awesome-notice', plugin_dir_url(__FILE__).'css/notice.css', array(), $this->version); ?>
 
             <div class="notice demo-awesome-notice is-dismissible">
                 <p>
-                    <img src="<?php echo esc_url(plugin_dir_url(__FILE__)); ?>images/logo.png"/><?php echo sprintf(
+                    <img src="<?php echo esc_url(plugin_dir_url(__FILE__)); ?>images/logo.png"/>
+                    <?php
+                    echo wp_kses_post( sprintf(
+                        /* translators: 1: opening <strong> tag, 2: closing </strong> tag. */
                         esc_html__(
                             'Thank you for installing %1$sDemo Awesome%2$s plugin by Theme4Press. To start importing a demo content please visit the importer page',
-                            'evolve'
+                            'demo-awesome'
                         ),
                         '<strong>',
                         '</strong>'
-                    ); ?>
+                    ) ); ?>
                     <a class="button"
                        href="<?php echo esc_url(
                            admin_url('themes.php?page=demo-awesome-importer')
@@ -1415,12 +1530,16 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return;
             }
 
-            wp_enqueue_style('demo-awesome-notice', plugin_dir_url(__FILE__).'css/notice.css'); ?>
+            wp_enqueue_style('demo-awesome-notice', plugin_dir_url(__FILE__).'css/notice.css', array(), $this->version); ?>
 
             <div class="notice demo-awesome-notice is-dismissible">
                 <p><?php echo wp_kses_post( Demo_Awesome_Admin::is_theme4press_theme_message()); ?><a
                             href="<?php echo esc_url(
-                                add_query_arg('hide-notice', 'demo_awesome_no_theme4press_theme_notice')
+                                wp_nonce_url(
+                                    add_query_arg('hide-notice', 'demo_awesome_no_theme4press_theme_notice'),
+                                    'demo_awesome_hide_notice',
+                                    '_demo_awesome_notice'
+                                )
                             ); ?>"><?php esc_html_e('Dismiss', 'demo-awesome'); ?></a>
                 </p>
             </div>
@@ -1434,7 +1553,8 @@ if (!class_exists('Demo_Awesome_Admin')) {
         {
             $message = '';
             if (!Demo_Awesome_Admin::is_theme4press_theme()) {
-                $message = "<span><img src='".plugin_dir_url(__FILE__)."images/logo.png' />".sprintf(
+                $message = "<span><img src='".esc_url(plugin_dir_url(__FILE__))."images/logo.png' />".sprintf(
+                        /* translators: 1,3: opening <strong> tag, 2,4: closing </strong> tag. */
                         esc_html__(
                             'The %1$sDemo Awesome%2$s plugin is designed only for %3$sTheme4Press%4$s themes',
                             'demo-awesome'
@@ -1501,6 +1621,40 @@ if (!class_exists('Demo_Awesome_Admin')) {
             $svg .= '</svg>';
 
             return $svg;
+        }
+
+        /**
+         * Allowlist for escaping markup that may contain inline SVG icons (from
+         * get_svg()). wp_kses_post() strips <svg>/<use>, so callers pass this list
+         * to wp_kses() to permit the icon markup in addition to standard post tags.
+         *
+         * Usage: echo wp_kses( $html, Demo_Awesome_Admin::allowed_svg_tags() );
+         *
+         * @since 1.0.5
+         * @return array Allowed HTML/SVG tags for wp_kses().
+         */
+        public static function allowed_svg_tags()
+        {
+            $svg_tags = array(
+                'svg'   => array(
+                    'class'           => true,
+                    'aria-hidden'     => true,
+                    'aria-labelledby' => true,
+                    'role'            => true,
+                    'xmlns'           => true,
+                    'width'           => true,
+                    'height'          => true,
+                    'viewbox'         => true,
+                    'fill'            => true,
+                    'focusable'       => true,
+                ),
+                'g'     => array('fill' => true),
+                'title' => array('title' => true),
+                'path'  => array('d' => true, 'fill' => true),
+                'use'   => array('href' => true, 'xlink:href' => true),
+            );
+
+            return array_merge(wp_kses_allowed_html('post'), $svg_tags);
         }
 
         /**
@@ -1596,7 +1750,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return;
             }
 
-            wp_enqueue_style('demo-awesome', plugin_dir_url(__FILE__).'css/admin.css');
+            wp_enqueue_style('demo-awesome', plugin_dir_url(__FILE__).'css/admin.css', array(), $this->version);
         }
 
         /**
@@ -1609,7 +1763,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return;
             }
 
-            wp_enqueue_script('demo-awesome', plugin_dir_url(__FILE__).'js/admin.js');
+            wp_enqueue_script('demo-awesome', plugin_dir_url(__FILE__).'js/admin.js', array('jquery'), $this->version, true);
           
           
             $local_variables = array(

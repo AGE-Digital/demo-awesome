@@ -1582,19 +1582,27 @@ jQuery(function ($) {
 
         var data = {
             'action': 'call_import_function_from_ajax',
-            'data_demo': data_demo, action: 'required_plugins',
+            'demo_index': data_demo.index,
             '_nonce': demo_awesome_js_local_vars._nonce
         };
-        jQuery.post(ajaxurl, data, function (response) {
+        var $alert = $('#finish-import-modal .alert-message-from-importer');
+        var showError = function (message) {
             $(".hide-content").fadeOut(1500);
+            $alert.removeClass('alert-success').addClass('alert-danger').text(message);
+            $(".show-content").fadeIn(1500).css("display", "flex");
+        };
+        jQuery.post(ajaxurl, data, function (response) {
             if (response && response.success) {
-                $('#finish-import-modal .alert-message-from-importer').removeClass('alert-danger').addClass('alert-success').text('').wrapInner(response.data.message);
+                $(".hide-content").fadeOut(1500);
+                $alert.removeClass('alert-danger').addClass('alert-success').text('').wrapInner(response.data.message);
+                $(".show-content").fadeIn(1500).css("display", "flex");
             }
             else {
-                $('#finish-import-modal .alert-message-from-importer').removeClass('alert-success').addClass('alert-danger').text('').wrapInner(response);
+                var d = (response && response.data) || {};
+                showError(d.message || d.errorMessage || 'The import failed. Please check the PHP error log for details.');
             }
-            $(".show-content").fadeIn(1500).css("display", "flex");
-
+        }).fail(function (xhr) {
+            showError('The import request failed (HTTP ' + xhr.status + '). The server may have run out of time or memory; please check the PHP error log.');
         });
     });
     $('.demo-screenshot, .call-import-demo-function, .button-primary.load-preview').click(function () {
@@ -1673,7 +1681,7 @@ jQuery(function ($) {
             url: ajaxurl,
             data: {
                 action: 'required_plugins',
-                data_demo: data_demo,
+                demo_index: data_demo.index,
                  '_nonce': demo_awesome_js_local_vars._nonce
             },
             success: function (data) {

@@ -9,7 +9,7 @@
  * Plugin Name:       Demo Awesome
  * Plugin URI:        https://theme4press.com/demo-awesome-the-data-importer/
  * Description:       Import the Theme4Press theme demo content including theme settings, menus, widgets, sliders, and much more with just one click. Awesome!
- * Version:           1.0.4
+ * Version:           1.0.6
  * Author:            Theme4Press
  * Author URI:        https://theme4press.com
  * License:           GPL-2.0+
@@ -26,7 +26,7 @@ if ( ! defined( 'WPINC' ) ) {
 /**
  * @since    1.0.0
  */
-define( 'DEMO_AWESOME_VERSION', '1.0.4' );
+define( 'DEMO_AWESOME_VERSION', '1.0.6' );
 
 /**
  * The class that is used to define internationalization,

@@ -126,7 +126,7 @@ if ( ! class_exists( 'Demo_Awesome_Widget_Importer' ) ) {
 					 *
 					 * Do before identical check because changes may make it identical to end result (such as URL replacements).
 					 */
-					$widget = apply_filters( 'widget_demo_import_settings', $widget, $id_base, $instance_id_number, $data_demo );
+					$widget = apply_filters( 'demo_awesome_widget_import_settings', $widget, $id_base, $instance_id_number, $data_demo );
 
 					// Does widget with identical settings already exist in same sidebar?
 					if ( ! $fail && isset( $widget_instances[ $id_base ] ) ) {
@@ -181,7 +181,7 @@ if ( ! class_exists( 'Demo_Awesome_Widget_Importer' ) ) {
 						update_option( 'widget_' . $id_base, $single_widget_instances );
 
 						// Assign widget instance to sidebar.
-						$sidebars_widgets                      = get_option( 'sidebars_widgets' ); // Which sidebars have which widgets, get fresh every time.
+						$sidebars_widgets                      = (array) get_option( 'sidebars_widgets', array() ); // Which sidebars have which widgets, get fresh every time.
 						$new_instance_id                       = $id_base . '-' . $new_instance_id_number; // Use ID number from new widget instance.
 						$sidebars_widgets[ $use_sidebar_id ][] = $new_instance_id; // Add new instance to sidebar.
 						update_option( 'sidebars_widgets', $sidebars_widgets ); // Save the amended data.

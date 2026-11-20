@@ -46,7 +46,14 @@ if ( ! class_exists( 'Demo_Awesome_Customizer_Importer' ) ) {
 				return new WP_Error( 'demo_awesome_customizer_import_content_error', esc_html__( 'Invalid file content detected.', 'demo-awesome' ) );
 			}
 
-			$data = maybe_unserialize( $file_content );
+			// Security: never instantiate arbitrary PHP objects from the import file.
+			// Customizer data is always a serialized array, so unserialize with
+			// object instantiation disabled to prevent PHP object injection.
+			if ( is_serialized( $file_content ) ) {
+				$data = unserialize( trim( $file_content ), array( 'allowed_classes' => false ) );
+			} else {
+				$data = $file_content;
+			}
 
 			// Data checks.
 			if ( ! is_array( $data ) && ( ! isset( $data['template'] ) || ! isset( $data['mods'] ) ) ) {
@@ -59,7 +66,7 @@ if ( ! class_exists( 'Demo_Awesome_Customizer_Importer' ) ) {
 			}
 
 			// Modify settings array.
-			$data = apply_filters( 'customizer_demo_import_settings', $data, $data_demo );
+			$data = apply_filters( 'demo_awesome_customizer_import_settings', $data, $data_demo );
 
 			// Import custom options.
 			if ( isset( $data['options'] ) ) {
@@ -171,9 +178,9 @@ if ( ! class_exists( 'Demo_Awesome_Customizer_Importer' ) ) {
 				// Do the validation and storage stuff.
 				$id = media_handle_sideload( $file_array, 0 );
 
-				// If error storing permanently, unlink.
+				// If error storing permanently, delete the temp file.
 				if ( is_wp_error( $id ) ) {
-					@unlink( $file_array['tmp_name'] );
+					wp_delete_file( $file_array['tmp_name'] );
 
 					return $id;
 				}
