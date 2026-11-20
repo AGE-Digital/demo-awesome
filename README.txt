@@ -52,6 +52,13 @@ We strongly recommend using these demos for newly created websites, development 
 * Fixed the demo import doing nothing but showing "requires additional plugins" (a stray duplicate AJAX action introduced by an earlier release)
 * Removed the over-aggressive request rate limit that blocked legitimate importing/plugin installation
 * Allowed required-plugin installation for any valid plugin slug (was limited to a small hardcoded list); hardened the activation match against regex injection
+* Fixed every import failing with "Invalid template name" (demo folders such as "business/1" were rejected)
+* Fixed 12 of the 20 demos being rejected because their content contains ordinary embed scripts; downloads are now validated by file format and rejected only if they contain PHP code
+* Security: the demo to import is now looked up by its index in the demo list from the demo server; folder, options and required plugins are no longer taken from the browser request
+* Fixed a premium demo, or a failed download, removing the site's theme settings, menus and widgets before the import was refused; nothing is removed until the demo content has been downloaded and validated
+* Fixed the download cache: cached files of some demos (App 1, App 2, Blog 1, Portfolio 1) could never be read back, so any repeat import within an hour failed; a missing or invalid cached copy is now downloaded again
+* Import errors are now shown in the import window instead of failing silently
+* Fixed LayerSlider data never being imported (demo list key mismatch) and PHP warnings for demos without slider data
 
 = 1.0.5 =
 * Security: prevented PHP object injection when importing customizer (.dat) data

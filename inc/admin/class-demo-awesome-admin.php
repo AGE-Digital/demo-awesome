@@ -126,43 +126,49 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
 
-            $packages = '';
-            $decode_url = base64_encode($url);
-            if (false === ($create_time = get_transient('demo_awesome_importer_packages_'.$decode_url))) {
-                // Security: Use wp_safe_remote_get with proper args
-                $raw_packages = wp_safe_remote_get($url, array(
-                    'timeout' => 30,
-                    'redirection' => 3,
-                    'user-agent' => 'Demo Awesome Plugin',
-                    'sslverify' => true,
-                    'headers' => array(
-                        'Accept' => 'application/json, text/plain, */*',
-                    )
-                ));
-                
-                if (!is_wp_error($raw_packages)) {
-                    $response_code = wp_remote_retrieve_response_code($raw_packages);
-                    if ($response_code === 200) {
-                        $packages = wp_remote_retrieve_body($raw_packages);
-                        
-                        // Security: Validate response content
-                        if ($packages && $this->validate_response_content($packages)) {
-                            set_transient('demo_awesome_importer_packages_'.$decode_url, time(), HOUR_IN_SECONDS);
-                            $this->write_file_to_local($packages, $decode_url.'.txt');
-                        } else {
-                            $packages = false;
-                        }
-                    }
-                }
-            } else {
-                // Security: Use safe file reading
-                $file_path = wp_upload_dir()['basedir'].DEMO_AWESOME_IMPORTER_FOLDER.$decode_url.'.txt';
+            // Cache file name and transient key are derived from an md5 of the URL. (They used to
+            // be base64, whose "=" padding was stripped when writing the file but not when reading
+            // it, so every cached read of such a URL failed.)
+            $cache_key = md5($url);
+            $transient = 'demo_awesome_importer_packages_'.$cache_key;
+            $cache_file = $cache_key.'.txt';
+
+            // Use the cached copy if it is fresh and still valid; otherwise download again.
+            if (false !== get_transient($transient)) {
+                $file_path = wp_upload_dir()['basedir'].DEMO_AWESOME_IMPORTER_FOLDER.$cache_file;
                 if (file_exists($file_path) && is_readable($file_path)) {
                     $packages = file_get_contents($file_path);
-                    if (!$this->validate_response_content($packages)) {
-                        $packages = false;
+                    if ($packages && $this->validate_response_content($packages)) {
+                        return $packages;
                     }
                 }
+            }
+
+            // Security: Use wp_safe_remote_get with proper args
+            $raw_packages = wp_safe_remote_get($url, array(
+                'timeout' => 30,
+                'redirection' => 3,
+                'user-agent' => 'Demo Awesome Plugin',
+                'sslverify' => true,
+                'headers' => array(
+                    'Accept' => 'application/json, text/plain, */*',
+                )
+            ));
+
+            if (is_wp_error($raw_packages) || wp_remote_retrieve_response_code($raw_packages) !== 200) {
+                return false;
+            }
+
+            $packages = wp_remote_retrieve_body($raw_packages);
+
+            // Security: Validate response content
+            if (!$packages || !$this->validate_response_content($packages)) {
+                return false;
+            }
+
+            // Only mark the cache as fresh if the copy was actually written.
+            if ($this->write_file_to_local($packages, $cache_file)) {
+                set_transient($transient, time(), HOUR_IN_SECONDS);
             }
 
             return $packages;
@@ -215,17 +221,26 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
             
-            // Check content length (prevent DoS)
-            if (strlen($content) > 10 * 1024 * 1024) { // 10MB limit for responses
+            // Check content length (prevent DoS). Same limit as validate_file_content().
+            if (strlen($content) > 50 * 1024 * 1024) {
                 return false;
             }
-            
-            // Check for malicious content
-            if (preg_match('/<\?php|<\?=|<script[^>]*>|javascript:|data:/i', $content)) {
-                return false;
-            }
-            
+
+            // No keyword filtering here: every response is cached and written through
+            // write_file_to_local(), which validates it per file type (XML/JSON/serialized/ZIP)
+            // and rejects PHP code. Blocking "<script", "javascript:" or "data:" rejected
+            // legitimate demo content (e.g. cached Twitter/YouTube embeds in post meta),
+            // which WordPress itself stores and imports as normal content.
             return true;
+        }
+
+        /**
+         * Whether a downloaded file contains a PHP opening tag.
+         * Demo data never legitimately contains PHP code.
+         * @since 1.0.6
+         */
+        private function contains_php_code($content) {
+            return (bool) preg_match('/<\?php|<\?=/i', $content);
         }
 
         /**
@@ -386,7 +401,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_xml_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -418,7 +433,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_json_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -432,7 +447,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_dat_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -451,7 +466,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_wie_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -479,7 +494,7 @@ if (!class_exists('Demo_Awesome_Admin')) {
          */
         private function validate_txt_content($content) {
             // Check for PHP code injection
-            if (preg_match('/<\?php|<\?=|<script/i', $content)) {
+            if ($this->contains_php_code($content)) {
                 return false;
             }
             
@@ -560,32 +575,81 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 return false;
             }
 
-            // Check for path traversal attempts
-            if (strpos($template_name, '..') !== false || 
-                strpos($template_name, '/') !== false || 
-                strpos($template_name, '\\') !== false) {
-                return false;
-            }
-
-            // Check for null bytes
-            if (strpos($template_name, "\0") !== false) {
-                return false;
-            }
-
-            // Sanitize and validate
-            $template_name = sanitize_file_name($template_name);
-            
             // Check length
             if (strlen($template_name) > 100) {
                 return false;
             }
 
-            // Only allow alphanumeric, hyphens, and underscores
-            if (!preg_match('/^[a-zA-Z0-9_-]+$/', $template_name)) {
+            // Demo folders are "<category>/<number>" (e.g. "business/1"), so one "/" between
+            // two safe segments is allowed. The whitelist excludes "..", backslashes, null
+            // bytes, leading/trailing slashes and anything else that could leave the demo folder.
+            return (bool) preg_match('#^[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)?$#', $template_name);
+        }
+
+        /**
+         * Look up the demo the user picked in the demo list downloaded from the demo server.
+         *
+         * The browser only identifies the demo by its "index". Everything else (folder, required
+         * plugins, options to update, slider flags) comes from the server-side list, never from
+         * the request, so a forged request cannot change what gets downloaded or which options
+         * get written.
+         *
+         * @since 1.0.6
+         * @return array|false Normalized demo data, or false if the demo is not in the list.
+         */
+        private function get_requested_demo() {
+            $index = '';
+            if (isset($_POST['demo_index'])) {
+                $index = sanitize_text_field(wp_unslash($_POST['demo_index']));
+            } elseif (isset($_POST['data_demo']['index'])) {
+                // Older admin.js sends the whole demo object; only its index is used.
+                $index = sanitize_text_field(wp_unslash($_POST['data_demo']['index']));
+            }
+            if ($index === '' || !preg_match('/^[0-9]+$/', $index)) {
                 return false;
             }
 
-            return true;
+            $list = json_decode((string) $this->get_list_demos(), true);
+            if (!is_array($list)) {
+                return false;
+            }
+            foreach ($list as $category) {
+                if (empty($category['items']) || !is_array($category['items'])) {
+                    continue;
+                }
+                foreach ($category['items'] as $item) {
+                    if (isset($item['index']) && (string) $item['index'] === $index) {
+                        return $this->normalize_demo_data($item);
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Fill in optional demo fields so later code can rely on them being set, and map the
+         * demo list's "has_LayerSlider WP_data" key to the "has_layerslider_data" key used here.
+         *
+         * @since 1.0.6
+         */
+        private function normalize_demo_data($demo) {
+            if (isset($demo['has_LayerSlider WP_data']) && !isset($demo['has_layerslider_data'])) {
+                $demo['has_layerslider_data'] = $demo['has_LayerSlider WP_data'];
+            }
+            $defaults = array(
+                'premium_demo' => false,
+                'has_theme4press_slider_data' => false,
+                'has_slider_revolution_data' => false,
+                'has_layerslider_data' => false,
+                'plugins' => array(),
+                'option_update' => array(),
+                'update_galleries' => array(),
+                'customizer_data_update' => array(),
+                'widgets_data_update' => array(),
+            );
+
+            return $this->validate_and_sanitize_demo_data(array_merge($defaults, $demo));
         }
 
         /**
@@ -648,49 +712,52 @@ if (!class_exists('Demo_Awesome_Admin')) {
                 wp_die();
             }
 
-            // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below via validate_and_sanitize_demo_data() (recursive sanitize_text_field) / sanitize_text_field().
-            $data_demo_raw = isset($_REQUEST['data_demo']) ? wp_unslash($_REQUEST['data_demo']) : array();
-            $data_demo = array();
-
-            // Security: Enhanced input validation and sanitization
-            if (is_array($data_demo_raw)) {
-                $data_demo = $this->validate_and_sanitize_demo_data($data_demo_raw);
-                if ($data_demo === false) {
-                    wp_send_json_error( array(
-                        'message' => 'Invalid demo data provided.',
-                        'code' => 'invalid_data'
-                    ));
-                    wp_die();
-                }
-            } else {
-                $data_demo = sanitize_text_field($data_demo_raw);
+            // Security: the demo is looked up by index in the server-side demo list; no other
+            // request data is used.
+            $data_demo = $this->get_requested_demo();
+            if ($data_demo === false) {
+                wp_send_json_error( array(
+                    'message' => esc_html__('The selected demo could not be found in the demo list. Please reload the page and try again. If it keeps happening, the demo server may be unreachable.', 'demo-awesome'),
+                    'code' => 'demo_not_found'
+                ));
+                wp_die();
             }
 
-            $template_name = isset($data_demo['folder_path']) ? sanitize_text_field($data_demo['folder_path']) : '';
+            $template_name = isset($data_demo['folder_path']) ? $data_demo['folder_path'] : '';
 
             // Security: Validate template name
             if (!$this->validate_template_name($template_name)) {
                 wp_send_json_error( array(
-                    'message' => 'Invalid template name.',
+                    'message' => esc_html__('Invalid demo folder.', 'demo-awesome'),
                     'code' => 'invalid_template'
                 ));
                 wp_die();
             }
 
-            $this->remove_old_datas($data_demo, $template_name);
-
+            // Check this before remove_old_datas(): refusing a premium demo must not
+            // first wipe the site's theme settings, menus and widgets.
             if (Demo_Awesome_Admin::is_premium_theme() == false && $data_demo['premium_demo']) {
-                wp_send_json_success(
+                wp_send_json_error(
                     array(
-                        'success' => true,
-                        'message' => sprintf(
-                            '<span>%s</span>',
-                            esc_html__('The premium demo requires the premium theme version', 'demo-awesome')
-                        ),
+                        'message' => esc_html__('The premium demo requires the premium theme version', 'demo-awesome'),
+                        'code' => 'premium_required'
                     )
                 );
                 wp_die();
             }
+
+            // Download and validate the demo content before removing anything, so a failed
+            // download leaves the site untouched. The file is cached, so the import step below
+            // reuses it instead of downloading it again.
+            if (!$this->get_import_file_path($template_name)) {
+                wp_send_json_error( array(
+                    'message' => esc_html__('The demo content could not be downloaded from the demo server, or it failed validation. Nothing on your site was changed. Please try again later.', 'demo-awesome'),
+                    'code' => 'download_failed'
+                ));
+                wp_die();
+            }
+
+            $this->remove_old_datas($data_demo, $template_name);
             // Import content data
             $this->import_content_theme($data_demo, $template_name);
             // Import customizer
@@ -792,18 +859,11 @@ if (!class_exists('Demo_Awesome_Admin')) {
             
             // Include the required plugins list
             require dirname(__FILE__).'/required-plugins.php';
-            // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below via validate_and_sanitize_demo_data() (recursive sanitize_text_field) / sanitize_text_field().
-            $data_demo_raw = isset($_REQUEST['data_demo']) ? wp_unslash($_REQUEST['data_demo']) : array();
-            $data_demo = array();
-
-            // Security: Enhanced input validation and sanitization
-            if (is_array($data_demo_raw)) {
-                $data_demo = $this->validate_and_sanitize_demo_data($data_demo_raw);
-                if ($data_demo === false) {
-                    wp_die(esc_html__('Invalid demo data provided.', 'demo-awesome'));
-                }
-            } else {
-                $data_demo = sanitize_text_field($data_demo_raw);
+            // Security: the demo (and so its required-plugin list) comes from the server-side
+            // demo list, looked up by index; no other request data is used.
+            $data_demo = $this->get_requested_demo();
+            if ($data_demo === false) {
+                wp_die(esc_html__('The selected demo could not be found in the demo list. Please reload the page and try again.', 'demo-awesome'));
             }
 
             demo_awesome_required_plugins($data_demo);

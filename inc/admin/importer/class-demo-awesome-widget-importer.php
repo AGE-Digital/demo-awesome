@@ -181,7 +181,7 @@ if ( ! class_exists( 'Demo_Awesome_Widget_Importer' ) ) {
 						update_option( 'widget_' . $id_base, $single_widget_instances );
 
 						// Assign widget instance to sidebar.
-						$sidebars_widgets                      = get_option( 'sidebars_widgets' ); // Which sidebars have which widgets, get fresh every time.
+						$sidebars_widgets                      = (array) get_option( 'sidebars_widgets', array() ); // Which sidebars have which widgets, get fresh every time.
 						$new_instance_id                       = $id_base . '-' . $new_instance_id_number; // Use ID number from new widget instance.
 						$sidebars_widgets[ $use_sidebar_id ][] = $new_instance_id; // Add new instance to sidebar.
 						update_option( 'sidebars_widgets', $sidebars_widgets ); // Save the amended data.
