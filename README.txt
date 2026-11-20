@@ -53,6 +53,7 @@ No personal data, account data or content from your site is sent. As with any we
 
 Premium demos may require premium plugins. With the evolve Plus theme, these are downloaded by the theme from Theme4Press using the theme's license key; Demo Awesome itself does not send the key. Free required plugins are installed from WordPress.org.
 
+Theme4Press terms and conditions: https://theme4press.com/terms-conditions/
 Theme4Press privacy policy: https://theme4press.com/privacy-policy/
 
 == Screenshots ==
